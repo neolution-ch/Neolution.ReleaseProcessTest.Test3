@@ -16,7 +16,7 @@ Our release process is designed to achieve the following:
 1.  **The `main` branch is the source of truth.** It always contains the code for the *next* potential release and should always be in a stable state.
 2.  **Developers interact with the GitHub UI, not complex Git commands.** Releases are triggered via a GitHub Actions workflow, not from a local machine.
 3.  **The `CHANGELOG.md` is our contract.** Every user-facing change must be accompanied by an entry in the changelog.
-4.  **Releases are marked by tags, not branches.** Release branches are temporary workspaces for exceptional cases (hotfixes) and should be deleted after use.
+4.  **Releases are marked by tags, not branches.** The `main` branch is the only long-lived branch. All other branches (`feature/*`, `release/*`, `hotfix/*`) are temporary and must be deleted after their purpose is served.
 
 ## Tools
 
@@ -49,9 +49,9 @@ PR reviewers are responsible for enforcing this.
 
 ---
 
-## How to Release: The Two Paths
+## How to Release: The Three Paths
 
-There are only two release scenarios. The first one will cover over 95% of all releases.
+There are three release scenarios. The first path will cover the vast majority of all releases, while the other two handle more advanced, less frequent scenarios.
 
 ### Path 1: The Standard Release (The Common Case)
 
@@ -76,9 +76,48 @@ There are only two release scenarios. The first one will cover over 95% of all r
 *   It creates a formal GitHub Release, using the changelog content for the release notes.
 *   It builds, packages, and publishes the new version to NuGet.
 
-### Path 2: The Hotfix Release (The Exceptional Case)
+### Path 2: The Stabilization Release (The Advanced Case)
 
-**Use this path ONLY when you need to patch an older version without including all the new features from `main`.** For example, fixing a critical bug in `v1.2.3` when `main` is already on its way to `v1.3.0`.
+**Use this path when you need to prepare a major or minor release (e.g., `2.0.0`) while allowing new, unrelated feature development to continue on the `main` branch.** This involves creating a temporary `release/*` branch to act as a feature-frozen staging area.
+
+1.  **Create a Release Branch from `main`.**
+    *   Once all features for the upcoming release are on `main`, create the stabilization branch.
+    ```bash
+    # On your local machine, ensure main is up-to-date
+    git checkout main
+    git pull
+    
+    # Create the release branch and push it
+    git checkout -b release/v2.0.0
+    git push --set-upstream origin release/v2.0.0
+    ```
+    *From this point, the `release/v2.0.0` branch is feature-frozen. Only fixes for this specific release are allowed. `main` is now free to accept features for the next version (e.g., `2.1.0`).*
+
+2.  **Publish Pre-Releases (e.g., RCs) from the Release Branch.**
+    *   Go to Actions, select the "Release OSS Package" workflow.
+    *   **Crucially, use the "Branch" dropdown to select your `release/v2.0.0` branch.**
+    *   For the inputs, specify the **exact version number** (e.g., `2.0.0-rc.0`) and set the `type` to `rc` (or `beta`).
+
+3.  **Apply Bug Fixes to the Release Branch and `main`.**
+    *   If a bug is found during testing, commit the fix to the `release/v2.0.0` branch first.
+    *   **CRITICAL: Immediately merge the fix back into `main`** to prevent regressions.
+    ```bash
+    # After committing the fix to release/v2.0.0
+    git checkout main
+    git pull
+    git merge --no-ff release/v2.0.0
+    git push
+    ```
+
+4.  **Publish the Final Stable Release.**
+    *   Run the workflow one last time from the `release/v2.0.0` branch.
+    *   Specify the **exact version number** (e.g., `2.0.0`) and set the `type` to `stable`.
+
+5.  **Clean up.** The `release/v2.0.0` branch can now be safely deleted.
+
+### Path 3: The Hotfix Release (The Exceptional Case)
+
+**Use this path ONLY when you need to patch an older stable or pre-release version without including all the new features from `main`.** For example, fixing a critical bug in `v1.2.3` when `main` is already on its way to `v2.0.0`.
 
 This process involves a few manual Git commands because it is an exceptional event that requires deliberate, careful action.
 
