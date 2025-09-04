@@ -1,0 +1,149 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: 'Version increment level (for main branch)'
+        required: false
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: 'patch'
+      type:
+        description: 'Release type'
+        required: true
+        type: choice
+        options:
+          - stable
+          - rc
+          - beta
+          - alpha
+        default: 'stable'
+      exact_version:
+        description: 'Exact version (required for release/* and hotfix/* branches)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install release-it and plugins
+        run: |
+          npm install -g release-it@latest
+          npm install -g @release-it/keep-a-changelog@latest
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Validate inputs for branch type
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          echo "Current branch: $BRANCH_NAME"
+          
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            echo "BRANCH_TYPE=main" >> $GITHUB_ENV
+            echo "Running standard release from main branch"
+          elif [[ "$BRANCH_NAME" == release/* ]]; then
+            echo "BRANCH_TYPE=release" >> $GITHUB_ENV
+            echo "Running stabilization release from release branch"
+            if [[ -z "${{ inputs.exact_version }}" ]]; then
+              echo "Error: exact_version is required for release branches"
+              exit 1
+            fi
+          elif [[ "$BRANCH_NAME" == hotfix/* ]]; then
+            echo "BRANCH_TYPE=hotfix" >> $GITHUB_ENV
+            echo "Running hotfix release from hotfix branch"
+            if [[ -z "${{ inputs.exact_version }}" ]]; then
+              echo "Error: exact_version is required for hotfix branches"
+              exit 1
+            fi
+          else
+            echo "Error: Releases can only be created from main, release/*, or hotfix/* branches"
+            exit 1
+          fi
+
+      - name: Run release-it (main branch)
+        if: env.BRANCH_TYPE == 'main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ inputs.type }}" == "stable" ]]; then
+            # Stable release - use default config (commits changelog, not pre-release)
+            release-it ${{ inputs.level }} --ci
+          else
+            # Pre-release - don't commit, mark as pre-release, don't update changelog
+            release-it ${{ inputs.level }} --preRelease=${{ inputs.type }} \
+              --no-git.commit \
+              --github.preRelease \
+              --plugins.@release-it/keep-a-changelog.addUnreleased=false \
+              --ci
+          fi
+
+      - name: Run release-it (release/hotfix branch)
+        if: env.BRANCH_TYPE == 'release' || env.BRANCH_TYPE == 'hotfix'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ inputs.exact_version }}"
+          
+          # Validate version format
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[0-9]+)?)?$ ]]; then
+            echo "Error: Invalid version format. Expected: X.Y.Z or X.Y.Z-prerelease"
+            exit 1
+          fi
+          
+          if [[ "${{ inputs.type }}" == "stable" ]]; then
+            # Stable release - don't commit, don't update changelog
+            release-it --new-version="$VERSION" \
+              --no-git.commit \
+              --plugins.@release-it/keep-a-changelog.addUnreleased=false \
+              --ci
+          else
+            # Pre-release - don't commit, mark as pre-release, don't update changelog
+            if [[ "$VERSION" == *"-"* ]]; then
+              release-it --new-version="$VERSION" \
+                --no-git.commit \
+                --github.preRelease \
+                --plugins.@release-it/keep-a-changelog.addUnreleased=false \
+                --ci
+            else
+              echo "Error: Pre-release type specified but version doesn't contain pre-release suffix"
+              exit 1
+            fi
+          fi
+
+      - name: Display release information
+        run: |
+          echo "✅ Release completed successfully!"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Branch Type: ${{ env.BRANCH_TYPE }}"
+          echo "Release Type: ${{ inputs.type }}"
+          if [[ "${{ env.BRANCH_TYPE }}" == "main" ]]; then
+            echo "Level: ${{ inputs.level }}"
+          else
+            echo "Exact Version: ${{ inputs.exact_version }}"
+          fi
+          echo ""
+          echo "🔗 Check the release: https://github.com/${{ github.repository }}/releases"
+          echo "🏷️ View tags: https://github.com/${{ github.repository }}/tags"
