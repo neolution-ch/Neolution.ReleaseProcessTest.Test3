@@ -1,0 +1,115 @@
+name: Create Stabilization Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      type:
+        description: 'Release type'
+        required: true
+        type: choice
+        options:
+          - stable
+          - rc
+          - beta
+          - alpha
+        default: 'stable'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install release-it and plugins
+        run: |
+          npm install -g release-it@latest
+          npm install -g @release-it/keep-a-changelog@latest
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Validate inputs for branch type
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          echo "Current branch: $BRANCH_NAME"
+
+          if [[ "$BRANCH_NAME" == release/* ]]; then
+            echo "BRANCH_TYPE=release" >> $GITHUB_ENV
+            echo "Running stabilization release from release branch"
+          else
+            echo "Error: Stabilization releases can only be created from release/* branches"
+            exit 1
+          fi
+
+      - name: Determine release version
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          BASE_VERSION=${BRANCH_NAME#release/v}
+
+          if [[ "${{ inputs.type }}" == "stable" ]]; then
+            VERSION="$BASE_VERSION"
+          else
+            # Get existing prerelease tags for the current BASE_VERSION and type
+            EXISTING_PRERELEASE_TAGS=$(git tag --list "v${BASE_VERSION}-${{ inputs.type }}.*")
+            HIGHEST_PRERELEASE_NUMBER=-1
+
+            if [[ -n "$EXISTING_PRERELEASE_TAGS" ]]; then
+              for TAG in $EXISTING_PRERELEASE_TAGS; do
+                CURRENT_NUMBER=$(echo "$TAG" | sed -n "s/^v${BASE_VERSION}-${{ inputs.type }}.//p")
+                if [[ "$CURRENT_NUMBER" =~ ^[0-9]+$ ]] && (( CURRENT_NUMBER > HIGHEST_PRERELEASE_NUMBER )); then
+                  HIGHEST_PRERELEASE_NUMBER="$CURRENT_NUMBER"
+                fi
+              done
+            fi
+
+            NEXT_PRERELEASE_NUMBER=$((HIGHEST_PRERELEASE_NUMBER + 1))
+            VERSION="${BASE_VERSION}-${{ inputs.type }}.$NEXT_PRERELEASE_NUMBER"
+          fi
+
+          echo "BASE_VERSION=$BASE_VERSION" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Run release-it
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ inputs.type }}" == "stable" ]]; then
+            # Stable release - update changelog and commit
+            release-it --increment="$VERSION" \
+              --ci \
+              --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+          else
+            # Pre-release - don't commit, mark as pre-release, don't update changelog
+            release-it --increment="$VERSION" \
+              --no-git.commit \
+              --github.preRelease \
+              --plugins.@release-it/keep-a-changelog.addUnreleased=false \
+              --ci \
+              --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+          fi
+
+      - name: Display release information
+        run: |
+          echo "✅ Stabilization release completed successfully!"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Branch Type: ${{ env.BRANCH_TYPE }}"
+          echo "Release Type: ${{ inputs.type }}"
+          echo "Version: ${{ env.VERSION }}"
+          echo ""
+          echo "🔗 Check the release: https://github.com/${{ github.repository }}/releases"
+          echo "🏷️ View tags: https://github.com/${{ github.repository }}/tags"

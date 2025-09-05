@@ -1,0 +1,184 @@
+name: Create Pre-Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      type:
+        description: 'Pre-release type'
+        required: true
+        type: choice
+        options:
+          - alpha
+          - beta
+          - rc
+      action:
+        description: 'Action type'
+        required: true
+        type: choice
+        options:
+          - continue
+          - transition
+          - new
+        default: 'continue'
+      level:
+        description: 'Version increment level (only used for new pre-releases)'
+        required: false
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: 'patch'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install release-it and plugins
+        run: |
+          npm install -g release-it@latest
+          npm install -g @release-it/keep-a-changelog@latest
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Validate branch
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          if [[ "$BRANCH_NAME" != "main" ]]; then
+            echo "Error: Pre-releases can only be created from main branch"
+            exit 1
+          fi
+
+      - name: Determine release command
+        run: |
+          if [[ "${{ inputs.action }}" == "continue" ]]; then
+            # For continue, find the latest tag with the specified pre-release type
+            LATEST_PRERELEASE_TAG=$(git tag --list | grep -E "${{ inputs.type }}\.[0-9]+$" | sort -V | tail -1)
+            if [[ -n "$LATEST_PRERELEASE_TAG" ]]; then
+              CURRENT_VERSION=${LATEST_PRERELEASE_TAG#v}
+              echo "Current version for continue: $CURRENT_VERSION (from latest ${{ inputs.type }} tag)"
+              echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+              # Temporarily tag current commit with the correct current version for release-it
+              git tag -f "$LATEST_PRERELEASE_TAG" HEAD
+              echo "TEMP_TAG_CREATED=$LATEST_PRERELEASE_TAG" >> $GITHUB_ENV
+            else
+              echo "Error: No existing ${{ inputs.type }} pre-release tags found for continue"
+              exit 1
+            fi
+          else
+            CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+            CURRENT_VERSION=${CURRENT_VERSION#v}
+            echo "Current version from git describe: $CURRENT_VERSION"
+          fi
+          echo "All tags:"
+          git tag --list
+          echo "Latest tag by date: $(git describe --tags --abbrev=0)"
+          echo "Action: ${{ inputs.action }}"
+          echo "Type: ${{ inputs.type }}"
+
+          if [[ "$CURRENT_VERSION" == *-* ]]; then
+            BASE_VERSION=${CURRENT_VERSION%%-*}
+            HAS_PRERELEASE=true
+            echo "BASE_VERSION=$BASE_VERSION" >> $GITHUB_ENV
+          else
+            HAS_PRERELEASE=false
+          fi
+          echo "HAS_PRERELEASE=$HAS_PRERELEASE" >> $GITHUB_ENV
+
+          if [[ "${{ inputs.action }}" == "continue" ]]; then
+            echo "Continue action: using pre-release version $CURRENT_VERSION"
+            echo "USE_CONTINUE=true" >> $GITHUB_ENV
+          elif [[ "${{ inputs.action }}" == "transition" ]]; then
+            if [[ "$HAS_PRERELEASE" == "true" ]]; then
+              echo "USE_TRANSITION=true" >> $GITHUB_ENV
+            else
+              echo "Error: Cannot transition - no existing pre-release to transition from"
+              exit 1
+            fi
+          else
+            if [[ "$HAS_PRERELEASE" == "true" ]]; then
+              echo "Error: Cannot create new pre-release - existing pre-release found, use 'transition' instead"
+              exit 1
+            else
+              echo "USE_NEW=true" >> $GITHUB_ENV
+            fi
+          fi
+
+      - name: Run release-it
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "$USE_CONTINUE" == "true" ]]; then
+            # Extract base version and current pre-release number
+            if [[ "$CURRENT_VERSION" =~ ^(.+)-${{ inputs.type }}\.([0-9]+)$ ]]; then
+              BASE_VERSION="${BASH_REMATCH[1]}"
+              CURRENT_NUM="${BASH_REMATCH[2]}"
+              NEXT_NUM=$((CURRENT_NUM + 1))
+              NEXT_VERSION="${BASE_VERSION}-${{ inputs.type }}.${NEXT_NUM}"
+              echo "Continuing from $CURRENT_VERSION to $NEXT_VERSION"
+              release-it --increment="$NEXT_VERSION" \
+                --no-git.commit \
+                --github.preRelease \
+                --plugins.@release-it/keep-a-changelog.addUnreleased=false \
+                --ci \
+                --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+            else
+              echo "Error: Could not parse current version $CURRENT_VERSION"
+              exit 1
+            fi
+          elif [[ "$USE_TRANSITION" == "true" ]]; then
+            VERSION="${BASE_VERSION}-${{ inputs.type }}.0"
+            release-it --new-version="$VERSION" --preRelease=${{ inputs.type }} \
+              --no-git.commit \
+              --github.preRelease \
+              --plugins.@release-it/keep-a-changelog.addUnreleased=false \
+              --ci \
+              --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+          elif [[ "$USE_NEW" == "true" ]]; then
+            release-it ${{ inputs.level }} --preRelease=${{ inputs.type }} \
+              --no-git.commit \
+              --github.preRelease \
+              --plugins.@release-it/keep-a-changelog.addUnreleased=false \
+              --ci \
+              --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+          fi
+
+      - name: Cleanup temporary tag
+        if: env.TEMP_TAG_CREATED
+        run: |
+          git tag -d "$TEMP_TAG_CREATED"
+
+      - name: Display release information
+        run: |
+          echo "✅ Pre-release completed successfully!"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Type: ${{ inputs.type }}"
+          if [[ "${{ inputs.action }}" == "continue" ]]; then
+            echo "Action: Continue current pre-release"
+          elif [[ "${{ inputs.action }}" == "transition" ]]; then
+            echo "Action: Transition to new pre-release type"
+          else
+            echo "Action: New pre-release"
+            echo "Level: ${{ inputs.level }}"
+          fi
+          echo ""
+          echo "🔗 Check the release: https://github.com/${{ github.repository }}/releases"
+          echo "🏷️ View tags: https://github.com/${{ github.repository }}/tags"

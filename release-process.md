@@ -17,13 +17,17 @@ Our release process is designed to achieve the following:
 2.  **Developers interact with the GitHub UI, not complex Git commands.** Releases are triggered via a GitHub Actions workflow, not from a local machine.
 3.  **The `CHANGELOG.md` is our contract.** Every user-facing change must be accompanied by an entry in the changelog.
 4.  **Releases are marked by tags, not branches.** The `main` branch is the only long-lived branch. All other branches (`feature/*`, `release/*`, `hotfix/*`) are temporary and must be deleted after their purpose is served.
+5.  **Main branch is protected - all merges must be via pull request. Only the GitHub release-bot may merge directly for changelog updates.**
 
 ## Tools
 
 To achieve these goals, we will use the following tools and standards:
 - [Semantic Versioning](https://semver.org/)
 - [Keep a Changelog](https://keepachangelog.com/)
-- A **single, manual-trigger GitHub Action** powered by standard command-line tools and actions.
+- **Three manual-trigger GitHub Actions** powered by standard command-line tools and actions:
+  - `Create Stable Release`: For production releases from main branch
+  - `Create Pre-Release`: For alpha/beta/rc releases from main branch
+  - `Create Branch Release`: For releases from release/* and hotfix/* branches
 
 ## The Developer's Responsibility: The Changelog Contract
 
@@ -47,6 +51,11 @@ PR reviewers are responsible for enforcing this.
 - Resolved a null reference exception when the input string is empty.
 ```
 
+**CHANGELOG Integrity Rules**
+
+- CHANGELOG.md must only be manually edited under the [Unreleased] section.
+- During merge conflicts, only resolve conflicts without adding or removing entries.
+
 ---
 
 ## How to Release: The Three Paths
@@ -58,11 +67,18 @@ There are three release scenarios. The first path will cover the vast majority o
 **Use this path when you want to release all the new features and fixes that have been merged into the `main` branch.** This process is the same for stable (`1.2.3`), release candidate (`-rc.0`), beta, and alpha releases.
 
 1.  **Go to your repository's "Actions" tab.**
-2.  **Select the "Release OSS Package" workflow.**
+2.  **Select the appropriate workflow:**
+    *   For stable releases: Select "Create Stable Release"
+    *   For pre-releases (alpha/beta/rc): Select "Create Pre-Release"
 3.  **Click the "Run workflow" button.** Make sure the `main` branch is selected.
 4.  **Fill out the inputs:**
-    *   **`level`**: Choose `patch`, `minor`, or `major` depending on the changes in the "Unreleased" section.
-    *   **`type`**: Choose `stable` for a production release, or `rc`, `beta`, `alpha` for a pre-release.
+    *   **For "Create Stable Release":**
+        *   **`level`**: Choose `patch`, `minor`, or `major` based on the changes in the "Unreleased" section.
+            *   **Important**: If the latest Git tag is a pre-release (e.g., `v1.0.0-alpha.3`), all level options will result in stabilizing to the base version (`v1.0.0`). This is the intended behavior for transitioning from pre-release to stable.
+    *   **For "Create Pre-Release":**
+        *   **`type`**: Choose `alpha`, `beta`, or `rc` for a pre-release.
+        *   **`action`**: Choose `continue` to increment the current pre-release, `transition` to switch to a different pre-release type (e.g., from alpha.1 to beta.0), or `new` to start a new pre-release from stable.
+        *   **`level`**: Required when `action` is `new` - choose `patch`, `minor`, or `major`. Ignored for `transition`.
 5.  **Click "Run workflow".**
 
 **That's it. The automation handles everything else:**
@@ -94,9 +110,9 @@ There are three release scenarios. The first path will cover the vast majority o
     *From this point, the `release/v2.0.0` branch is feature-frozen. Only fixes for this specific release are allowed. `main` is now free to accept features for the next version (e.g., `2.1.0`).*
 
 2.  **Publish Pre-Releases (e.g., RCs) from the Release Branch.**
-    *   Go to Actions, select the "Release OSS Package" workflow.
+    *   Go to Actions, select the "Create Branch Release" workflow.
     *   **Crucially, use the "Branch" dropdown to select your `release/v2.0.0` branch.**
-    *   For the inputs, specify the **exact version number** (e.g., `2.0.0-rc.0`) and set the `type` to `rc` (or `beta`).
+    *   For the inputs, set the `type` to `alpha`, `beta`, or `rc`. The version will be automatically parsed from the branch name and the appropriate suffix appended (e.g., `2.0.0-rc.0`).
 
 3.  **Apply Bug Fixes to the Release Branch and `main`.**
     *   If a bug is found during testing, commit the fix to the `release/v2.0.0` branch first.
@@ -110,8 +126,8 @@ There are three release scenarios. The first path will cover the vast majority o
     ```
 
 4.  **Publish the Final Stable Release.**
-    *   Run the workflow one last time from the `release/v2.0.0` branch.
-    *   Specify the **exact version number** (e.g., `2.0.0`) and set the `type` to `stable`.
+    *   Run the "Create Branch Release" workflow one last time from the `release/v2.0.0` branch.
+    *   Set the `type` to `stable`. The version will be automatically parsed from the branch name.
 
 5.  **Clean up.** The `release/v2.0.0` branch can now be safely deleted.
 
@@ -124,8 +140,10 @@ This process involves a few manual Git commands because it is an exceptional eve
 1.  **Create a Hotfix Branch from the Old Version's Tag.**
     ```bash
     # On your local machine, check out the specific tag you need to patch
-    git checkout -b hotfix/v1.2.4 v1.2.3
+    git checkout -b hotfix/v1.2.3 v1.2.3
     ```
+
+    The version number is detected from git history. The branch name must start with the `hotfix/` prefix.
 
 2.  **Apply the Fix.** There are two ways to do this:
     *   **A) The fix is already on `main`:** Cherry-pick the specific commit.
@@ -134,31 +152,23 @@ This process involves a few manual Git commands because it is an exceptional eve
         ```
     *   **B) The fix is new:** Make the code changes directly on this hotfix branch and commit them.
 
-3.  **Manually Update the Changelog.** On the `hotfix/v1.2.4` branch, edit `CHANGELOG.md` to document the fix under a new version heading. This is a rare manual edit for an exceptional case.
+3.  **Update the Changelog.** On the `hotfix/v1.2.3` branch, ensure the fix is documented in the `[Unreleased]` section of `CHANGELOG.md`. The workflow will automatically move it to a new version heading.
 
 4.  **Push the Hotfix Branch.**
     ```bash
-    git push --set-upstream origin hotfix/v1.2.4
+    git push --set-upstream origin hotfix/v1.2.3
     ```
 
 5.  **Run the Release Workflow from the Hotfix Branch.**
-    *   Go to the "Actions" tab and select the "Release OSS Package" workflow.
-    *   **Crucially, use the "Branch" dropdown to select your `hotfix/v1.2.4` branch.**
-    *   For the inputs, specify the **exact version number** (e.g., `1.2.4`) and set the type to `stable`.
+    *   Go to the "Actions" tab and select the "Create Branch Release" workflow.
+    *   **Crucially, use the "Branch" dropdown to select your `hotfix/v1.2.3` branch.**
+    *   For the inputs, set the `type` to `stable`. The version will be automatically parsed from the branch name.
 
 6.  **Merge the Hotfix Back into `main`.** This is a critical final step to ensure the fix is not lost in future releases.
-    ```bash
-    # Switch back to main and make sure it's up-to-date
-    git checkout main
-    git pull
+    *   Since `main` is protected, create a pull request (PR) from the `hotfix/v1.2.3` branch to `main` and merge it through the GitHub UI.
+    *   You may need to resolve a small merge conflict in `CHANGELOG.md`. This is expected. Simply ensure the fix is noted in the `[Unreleased]` section of `main`'s changelog. During merge conflict resolution, do not add or remove entries; only resolve the conflict to maintain integrity.
 
-    # Merge the completed hotfix branch
-    git merge --no-ff hotfix/v1.2.4
-    git push
-    ```
-    *You may need to resolve a small merge conflict in `CHANGELOG.md`. This is expected. Simply ensure the fix is noted in the `[Unreleased]` section of `main`'s changelog.*
-
-7.  **Clean up.** The `hotfix/v1.2.4` branch can now be safely deleted from GitHub and your local machine.
+7.  **Clean up.** The `hotfix/v1.2.3` branch can now be safely deleted from GitHub and your local machine.
 
 ---
 ### Initial Release
@@ -166,4 +176,5 @@ This process involves a few manual Git commands because it is an exceptional eve
 To create the very first release of a package (e.g., `0.1.0`):
 1. Ensure your `CHANGELOG.md` file is created and has an `[Unreleased]` section with an entry like "Initial release 🎉".
 2. Follow **Path 1: The Standard Release**.
-3. Set the `level` input to `minor` and the `type` to `stable`. This will create the `0.1.0` release.
+3. Select the "Create Stable Release" workflow.
+4. Set the `level` input to `minor`. This will create the `0.1.0` release as the first version.
