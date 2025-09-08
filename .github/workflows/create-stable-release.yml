@@ -52,7 +52,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          release-it ${{ inputs.level }} --ci --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+          release-it ${{ inputs.level }} --plugins.@release-it/keep-a-changelog.addVersionUrl=true --ci
 
       - name: Display release information
         run: |

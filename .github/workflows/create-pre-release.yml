@@ -5,7 +5,6 @@ on:
     inputs:
       type:
         description: 'Pre-release type'
-        required: true
         type: choice
         options:
           - alpha
@@ -138,8 +137,8 @@ jobs:
                 --no-git.commit \
                 --github.preRelease \
                 --plugins.@release-it/keep-a-changelog.addUnreleased=false \
-                --ci \
-                --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+                --plugins.@release-it/keep-a-changelog.addVersionUrl=true \
+                --ci
             else
               echo "Error: Could not parse current version $CURRENT_VERSION"
               exit 1
@@ -150,15 +149,15 @@ jobs:
               --no-git.commit \
               --github.preRelease \
               --plugins.@release-it/keep-a-changelog.addUnreleased=false \
-              --ci \
-              --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+              --plugins.@release-it/keep-a-changelog.addVersionUrl=true \
+              --ci
           elif [[ "$USE_NEW" == "true" ]]; then
             release-it ${{ inputs.level }} --preRelease=${{ inputs.type }} \
               --no-git.commit \
               --github.preRelease \
               --plugins.@release-it/keep-a-changelog.addUnreleased=false \
-              --ci \
-              --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+              --plugins.@release-it/keep-a-changelog.addVersionUrl=true \
+              --ci
           fi
 
       - name: Cleanup temporary tag

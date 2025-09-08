@@ -1,18 +1,16 @@
-name: Create Stabilization Release
+name: Create Branch Release
 
 on:
   workflow_dispatch:
     inputs:
       type:
         description: 'Release type'
-        required: true
         type: choice
         options:
           - stable
           - rc
           - beta
           - alpha
-        default: 'stable'
 
 permissions:
   contents: write
@@ -43,24 +41,36 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Validate inputs for branch type
+      - name: Validate branch and detect type
         run: |
           BRANCH_NAME="${{ github.ref_name }}"
           echo "Current branch: $BRANCH_NAME"
 
           if [[ "$BRANCH_NAME" == release/* ]]; then
             echo "BRANCH_TYPE=release" >> $GITHUB_ENV
-            echo "Running stabilization release from release branch"
+            echo "Running branch release from release branch"
+          elif [[ "$BRANCH_NAME" == hotfix/* ]]; then
+            echo "BRANCH_TYPE=hotfix" >> $GITHUB_ENV
+            echo "Running branch release from hotfix branch"
           else
-            echo "Error: Stabilization releases can only be created from release/* branches"
+            echo "Error: Branch releases can only be created from release/* or hotfix/* branches"
             exit 1
           fi
 
-      - name: Determine release version
+      - name: Determine base version
         run: |
           BRANCH_NAME="${{ github.ref_name }}"
-          BASE_VERSION=${BRANCH_NAME#release/v}
+          if [[ "$BRANCH_TYPE" == "release" ]]; then
+            BASE_VERSION=${BRANCH_NAME#release/v}
+          elif [[ "$BRANCH_TYPE" == "hotfix" ]]; then
+            MERGE_BASE=$(git merge-base HEAD origin/main)
+            LATEST_TAG=$(git describe --tags --abbrev=0 $MERGE_BASE)
+            BASE_VERSION=${LATEST_TAG#v}
+          fi
+          echo "BASE_VERSION=$BASE_VERSION" >> $GITHUB_ENV
 
+      - name: Determine release version
+        run: |
           if [[ "${{ inputs.type }}" == "stable" ]]; then
             VERSION="$BASE_VERSION"
           else
@@ -81,8 +91,14 @@ jobs:
             VERSION="${BASE_VERSION}-${{ inputs.type }}.$NEXT_PRERELEASE_NUMBER"
           fi
 
-          echo "BASE_VERSION=$BASE_VERSION" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Validate version format
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[0-9]+)?)?$ ]]; then
+            echo "Error: Invalid version format. Expected: X.Y.Z or X.Y.Z-prerelease"
+            exit 1
+          fi
 
       - name: Run release-it
         env:
@@ -91,21 +107,21 @@ jobs:
           if [[ "${{ inputs.type }}" == "stable" ]]; then
             # Stable release - update changelog and commit
             release-it --increment="$VERSION" \
-              --ci \
-              --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+              --plugins.@release-it/keep-a-changelog.addVersionUrl=true \
+              --ci
           else
             # Pre-release - don't commit, mark as pre-release, don't update changelog
             release-it --increment="$VERSION" \
               --no-git.commit \
               --github.preRelease \
               --plugins.@release-it/keep-a-changelog.addUnreleased=false \
-              --ci \
-              --plugins.@release-it/keep-a-changelog.addVersionUrl=true
+              --plugins.@release-it/keep-a-changelog.addVersionUrl=true \
+              --ci
           fi
 
       - name: Display release information
         run: |
-          echo "✅ Stabilization release completed successfully!"
+          echo "✅ Branch release completed successfully!"
           echo "Branch: ${{ github.ref_name }}"
           echo "Branch Type: ${{ env.BRANCH_TYPE }}"
           echo "Release Type: ${{ inputs.type }}"
