@@ -109,6 +109,8 @@ There are three release scenarios. The first path will cover the vast majority o
     ```
     *From this point, the `release/v2.0.0` branch is feature-frozen. Only fixes for this specific release are allowed. `main` is now free to accept features for the next version (e.g., `2.1.0`).*
     
+    **Critical**: The release branch must be preserved until the stable release is complete. Do not delete the release branch before producing the final stable release, as this could make it impossible to continue isolated stabilization work.
+
     *Note: The 'Create Branch Release' workflow automatically detects whether it's running from a `release/*` or `hotfix/*` branch and adjusts version detection accordingly.*
     
     2.  **Publish Pre-Releases (e.g., RCs) from the Release Branch.**
@@ -116,22 +118,20 @@ There are three release scenarios. The first path will cover the vast majority o
     *   **Crucially, use the "Branch" dropdown to select your `release/v2.0.0` branch.**
     *   For the inputs, set the `type` to `alpha`, `beta`, or `rc`. The version will be automatically parsed from the branch name and the appropriate suffix appended (e.g., `2.0.0-rc.0`).
 
-3.  **Apply Bug Fixes to the Release Branch and `main`.**
+3.  **Apply Bug Fixes to the Release Branch.**
     *   If a bug is found during testing, commit the fix to the `release/v2.0.0` branch first.
-    *   **CRITICAL: Immediately merge the fix back into `main`** to prevent regressions.
-    ```bash
-    # After committing the fix to release/v2.0.0
-    git checkout main
-    git pull
-    git merge --no-ff release/v2.0.0
-    git push
-    ```
+    
+    *   **Note**: Bug fixes can be cherry-picked into `main` at any point during the stabilization process, but the release branch itself cannot be merged into `main` until after the stable release is complete.
 
 4.  **Publish the Final Stable Release.**
     *   Run the "Create Branch Release" workflow one last time from the `release/v2.0.0` branch.
     *   Set the `type` to `stable`. The version will be automatically parsed from the branch name.
 
-5.  **Clean up.** The `release/v2.0.0` branch can now be safely deleted.
+5.  **Merge Release Branch Back to `main`.**
+    *   Create a pull request from the `release/v2.0.0` branch to `main` and merge it to ensure all fixes are included in future development.
+    *   Resolve any CHANGELOG.md merge conflicts carefully, preserving both release history and ongoing development entries.
+
+6.  **Clean up.** The `release/v2.0.0` branch can now be safely deleted.
 
 ### Path 3: The Hotfix Release (The Exceptional Case)
 
@@ -145,7 +145,7 @@ This process involves a few manual Git commands because it is an exceptional eve
     git checkout -b hotfix/v1.2.3 v1.2.3
     ```
 
-    The version number is detected from git history. The branch name must start with the `hotfix/` prefix.
+    The version number is automatically detected from the latest Git tag in the branch history using release-it. The branch name must start with the `hotfix/` prefix.
     
     *Note: The 'Create Branch Release' workflow automatically detects whether it's running from a `release/*` or `hotfix/*` branch and adjusts version detection accordingly.*
     
@@ -166,7 +166,7 @@ This process involves a few manual Git commands because it is an exceptional eve
 5.  **Run the Release Workflow from the Hotfix Branch.**
     *   Go to the "Actions" tab and select the "Create Branch Release" workflow.
     *   **Crucially, use the "Branch" dropdown to select your `hotfix/v1.2.3` branch.**
-    *   For the inputs, set the `type` to `stable`. The version will be automatically parsed from the branch name.
+    *   For the inputs, set the `type` to `stable`. The version will be automatically calculated from the latest Git tag in the branch history.
 
 6.  **Merge the Hotfix Back into `main`.** This is a critical final step to ensure the fix is not lost in future releases.
     *   Since `main` is protected, create a pull request (PR) from the `hotfix/v1.2.3` branch to `main` and merge it through the GitHub UI.
@@ -196,7 +196,7 @@ All workflows use [release-it](https://github.com/release-it/release-it) with th
 - **Stable and Pre-Release workflows**: Version detection based on existing Git tags and the specified level/action parameters
 - **Branch releases**:
   - For `release/*` branches: Automatic detection from branch name (e.g., `release/v2.0.0` → `2.0.0`)
-  - For `hotfix/*` branches: Detection from Git history and branch name prefix
+  - For `hotfix/*` branches: Automatic detection from Git tag history using release-it's built-in logic
 - **Pre-releases**: Complex logic combining action type, existing tags, and user inputs to determine the appropriate version number
 
 ---

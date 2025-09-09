@@ -57,41 +57,30 @@ jobs:
             exit 1
           fi
 
-      - name: Determine base version
-        run: |
-          BRANCH_NAME="${{ github.ref_name }}"
-          if [[ "$BRANCH_TYPE" == "release" ]]; then
-            BASE_VERSION=${BRANCH_NAME#release/v}
-          elif [[ "$BRANCH_TYPE" == "hotfix" ]]; then
-            MERGE_BASE=$(git merge-base HEAD origin/main)
-            LATEST_TAG=$(git describe --tags --abbrev=0 $MERGE_BASE)
-            BASE_VERSION=${LATEST_TAG#v}
-          fi
-          echo "BASE_VERSION=$BASE_VERSION" >> $GITHUB_ENV
-
       - name: Determine release version
         run: |
-          if [[ "${{ inputs.type }}" == "stable" ]]; then
-            VERSION="$BASE_VERSION"
-          else
-            # Get existing prerelease tags for the current BASE_VERSION and type
-            EXISTING_PRERELEASE_TAGS=$(git tag --list "v${BASE_VERSION}-${{ inputs.type }}.*")
-            HIGHEST_PRERELEASE_NUMBER=-1
-
-            if [[ -n "$EXISTING_PRERELEASE_TAGS" ]]; then
-              for TAG in $EXISTING_PRERELEASE_TAGS; do
-                CURRENT_NUMBER=$(echo "$TAG" | sed -n "s/^v${BASE_VERSION}-${{ inputs.type }}.//p")
-                if [[ "$CURRENT_NUMBER" =~ ^[0-9]+$ ]] && (( CURRENT_NUMBER > HIGHEST_PRERELEASE_NUMBER )); then
-                  HIGHEST_PRERELEASE_NUMBER="$CURRENT_NUMBER"
-                fi
-              done
+          if [[ "$BRANCH_TYPE" == "hotfix" ]]; then
+            # For hotfix branches, always increment patch version as base
+            if [[ "${{ inputs.type }}" == "stable" ]]; then
+              VERSION=$(release-it --release-version patch)
+            else
+              # For pre-releases, use prepatch to get next patch with pre-release suffix
+              VERSION=$(release-it --release-version prepatch --preRelease=${{ inputs.type }})
             fi
-
-            NEXT_PRERELEASE_NUMBER=$((HIGHEST_PRERELEASE_NUMBER + 1))
-            VERSION="${BASE_VERSION}-${{ inputs.type }}.$NEXT_PRERELEASE_NUMBER"
+          else
+            # For release branches, use branch name as base version
+            BRANCH_NAME="${{ github.ref_name }}"
+            BASE_VERSION=${BRANCH_NAME#release/v}
+            if [[ "${{ inputs.type }}" == "stable" ]]; then
+              VERSION="$BASE_VERSION"
+            else
+              # For pre-releases, calculate next pre-release version
+              VERSION=$(release-it --release-version prerelease --preRelease=${{ inputs.type }})
+            fi
           fi
-
+          
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Calculated version: $VERSION"
 
       - name: Validate version format
         run: |
