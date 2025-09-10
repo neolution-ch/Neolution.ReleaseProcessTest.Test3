@@ -95,7 +95,9 @@ Use this path when you need to prepare a major or minor release (e.g., `2.0.0`) 
 
 This involves creating a temporary `release/*` branch to act as a feature-frozen staging area.
 
-**Before running the automation:** Create a Release Branch from `main`.
+**Before running the automation:** Create a Release Branch from `main` with the targeted version in the name (e.g., `release/v2.0.0`).
+
+Use only stable version numbers in the name. You can still produce pre-releases from that branch, they will use that version number as the base.
 
 *From this point, the `release/v2.0.0` branch is feature-frozen. Only fixes for this specific release are allowed. `main` is now free to accept features for the next version (e.g., `2.1.0`).*
 
@@ -109,7 +111,7 @@ Bug fixes can be cherry-picked into `main` at any point during the stabilization
 
 Use this path when you need to patch an older stable or pre-release version without including all the new features from `main`.** For example, fixing a critical bug in `v1.2.3` when `main` is already on its way to `v2.0.0`.
 
-**Before running the automation:** Create a Hotfix Branch from the old version's Tag.
+**Before running the automation:** Create a Hotfix Branch (e.g., `hotfix/stream-buffer-issue`). from the old version's Tag.
 
 Make sure that the `[Unreleased]` section of the `CHANGELOG.md` file includes all updates of the hotfix release.
 
