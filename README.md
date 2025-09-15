@@ -18,13 +18,13 @@ Our release process is designed to achieve the following:
 2. **Developers interact with the GitHub UI, not complex Git commands.** Releases are triggered via a GitHub Actions workflow, not from a local machine.
 3. **The `CHANGELOG.md` is our contract.** Every user-facing change must be accompanied by an entry in the changelog.
 4. **Releases are marked by tags, not branches.** The `main` branch is the only long-lived branch. All other branches (e.g., `release/*`, `hotfix/*`, `feature/*`) are temporary and must be deleted after their purpose is served.
-5. **`main` branch is protected - all merges must be via pull request. Only the GitHub release-bot may merge directly for changelog updates.**
+5. **`main` branch is protected - all merges must be via pull request.** Only the GitHub release-bot may merge directly for changelog updates.
 
 ## Tools
 
 To achieve these goals, we will use the following tools and standards:
-s
 
+- [Google Release Please](https://github.com/googleapis/release-please)
 - [Semantic Versioning](https://semver.org/)
 - [Keep a Changelog](https://keepachangelog.com/)
 
@@ -36,98 +36,79 @@ This entire automated process relies on one simple rule for every developer.
 
 PR reviewers are responsible for enforcing this.
 
-### Example `CHANGELOG.md` on the `main` branch
+### Controlling the Version Bump
+
+The automation determines the next version number (patch, minor, or major) based on the section headings you use in the `[Unreleased]` block of the `CHANGELOG.md`.
+
+- **Patch Release (`x.y.Z`):** The automation will propose a patch release if `[Unreleased]` only contains sections like `### Changed`, `### Fixed`, `### Deprecated`, `### Removed`, or `### Security`.
+- **Minor Release (`x.Y.0`):** The automation will propose a minor release if `[Unresolved]` contains a `### Added` section.
+- **Major Release (`X.0.0`):** To trigger a major release, you must add a line starting with `BREAKING CHANGE:` to the description of a changelog entry.
+
+**Example for a Major Bump:**
 
 ```markdown
-# Changelog
-...
-## [Unreleased]
-
-### Added
-- Feature to export user data to JSON.
-- New CancellationToken parameter to `ProcessAsync` method.
-
-### Fixed
-- Resolved a null reference exception when the input string is empty.
+### Changed
+- The `ProcessAsync` method now requires a `priority` parameter.
+  BREAKING CHANGE: The method signature for `ProcessAsync` has changed.
 ```
 
 ### CHANGELOG Integrity Rules
 
-- CHANGELOG.md must only be manually edited under the [Unreleased] section.
+- `CHANGELOG.md` must only be manually edited under the `[Unreleased]` section.
 - During merge conflicts, only resolve conflicts without adding or removing entries, preserving both release history and ongoing development entries.
 
 ---
 
-## How to Release: The Three Paths
+## How to Create a Release
 
-There are three release scenarios. The first path will cover the vast majority of all releases, while the other two handle more advanced, less frequent scenarios.
+All releases are created by manually running the **Release** workflow from the GitHub "Actions" tab.
+
+1. Navigate to the **Actions** tab in the GitHub repository.
+2. Select the **Release** workflow in the left sidebar.
+3. Click the **"Run workflow"** dropdown.
+4. Select the branch you wish to release from (`main`, `release/*`, or `hotfix/*`).
+5. For pre-releases, choose a type (`alpha`, `beta`, `rc`). For a final, stable release, leave it as `stable`.
+6. Click **"Run workflow"**.
+
+The automation will then open a "Release PR" with the proposed version number and changelog. Once this PR is merged, the workflow will tag the release and create a formal GitHub Release.
 
 ### What the automation always handles
 
-#### For pre-releases
-
-- It calculates the new version number
-- It reads the contents of the `[Unreleased]` section to use for the release notes.
-- It creates a new Git tag (e.g., `v1.3.0-alpha.0`).
-- It creates a formal GitHub Release, using the changelog content for the release notes.
-
-#### For stable releases
-
-- It calculates the new version number
+- It calculates the new version number based on the `CHANGELOG.md`.
 - It reads the contents of the `[Unreleased]` section to use for the release notes.
 - It updates `CHANGELOG.md`: The `[Unreleased]` content is moved under a new version heading (e.g., `[1.3.0] - 2023-10-27`).
 - It creates a new, empty `[Unreleased]` section.
-- It commits this updated file back to the `main` branch.
-- It creates a new Git tag (e.g., `v1.3.0`).
+- It commits this updated file back to the branch.
+- It creates a new Git tag (e.g., `v1.3.0` or `v1.3.0-alpha.0`).
 - It creates a formal GitHub Release, using the changelog content for the release notes.
+
+## The Three Release Paths
 
 ### Path 1: The Standard Release
 
-Use this path when you want to release the current state of the `main` branch.
+Use this path when you want to release the current state of the `main` branch. This process is the same for stable (`1.2.3`) and pre-releases (`-alpha.0`, `-beta.0`, `-rc.0`).
 
-This process is the same for stable (`1.2.3`) and pre-releases (`-alpha.0`,`-beta.0`,`-rc.0`).
-
-**Before running the automation:** Make sure that the `[Unreleased]` section of the `CHANGELOG.md` file includes all updates of the new release.
+**To run the automation:** Trigger the **Release** workflow on the `main` branch.
 
 ### Path 2: The Stabilization Release
 
 Use this path when you need to prepare a major or minor release (e.g., `2.0.0`) while allowing new, unrelated feature development to continue on the `main` branch.
 
-This involves creating a temporary `release/*` branch to act as a feature-frozen staging area.
+**Before running the automation:** Create a release branch from `main` with the targeted stable version in the name (e.g., `release/v2.0.0`). From this point, the release branch is feature-frozen.
 
-**Before running the automation:** Create a Release Branch from `main` with the targeted version in the name (e.g., `release/v2.0.0`).
-
-Use only stable version numbers in the name. You can still produce pre-releases from that branch, they will use that version number as the base.
-
-*From this point, the `release/v2.0.0` branch is feature-frozen. Only fixes for this specific release are allowed. `main` is now free to accept features for the next version (e.g., `2.1.0`).*
-
-Make sure that the `[Unreleased]` section of the `CHANGELOG.md` file includes all updates of the stabilized release.
-
-Bug fixes can be cherry-picked into `main` at any point during the stabilization process.
-
-**Critical**: The release branch must be preserved until a stable release is produced from it. Do not delete the release branch before that point in time, as it could make it impossible to continue isolated stabilization work.
+**To run the automation:** Trigger the **Release** workflow on the `release/v2.0.0` branch. You can create multiple pre-releases (`alpha`, `beta`, `rc`) before the final stable release.
 
 ### Path 3: The Hotfix Release
 
-Use this path when you need to patch an older stable or pre-release version without including all the new features from `main`.** For example, fixing a critical bug in `v1.2.3` when `main` is already on its way to `v2.0.0`.
+Use this path when you need to patch an older release without including all the new features from `main`.
 
-**Before running the automation:** Create a Hotfix Branch (e.g., `hotfix/stream-buffer-issue`). from the old version's Tag.
+**Before running the automation:** Create a hotfix branch from the old version's Git tag (e.g., `hotfix/stream-buffer-issue`).
 
-Make sure that the `[Unreleased]` section of the `CHANGELOG.md` file includes all updates of the hotfix release.
+**To run the automation:** Trigger the **Release** workflow on the `hotfix/stream-buffer-issue` branch.
 
-### Additional automation after Path 2 and 3
+### Automatic Merge-Back of Release and Hotfix Branches
 
-After a `release/*` or a `hotfix/*` branch has produced a stable release, a pull request is automatically created to merge that branch back into `main` to ensure all changes and fixes are included in future development.
-
-Resolve any CHANGELOG.md merge conflicts carefully, preserving both release history and ongoing development entries.
-
-With merging the pull request the branch can be safely deleted. The commit of the release has been tagged already.
-
----
-
-## Implementation Details
-
-All workflows use [release-it](https://github.com/release-it/release-it) with the [keep-a-changelog](https://github.com/release-it/keep-a-changelog) plugin to automate versioning, changelog management, and GitHub releases.
+After a `release/*` or `hotfix/*` branch has produced a stable release, a pull request is automatically created to merge that branch back into `main` to ensure all changes and fixes are included in future development.
 
 ---
 

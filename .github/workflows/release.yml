@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Select the release type. Leave as "stable" for a final release.'
+        type: choice
+        options:
+          - stable
+          - alpha
+          - beta
+          - rc
+        default: 'stable'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare release-please configuration
+        id: prepare_config
+        run: |
+          if [[ "${{ github.ref_name }}" == release* ]]; then
+            version=$(echo "${{ github.ref_name }}" | cut -d'/' -f2)
+            jq --arg version "$version" '.["release-as"] = $version' release-please-config.json > tmp.json && mv tmp.json release-please-config.json
+          fi
+          
+          if [ "${{ github.event.inputs.release_type }}" != "stable" ]; then
+            jq --arg prerelease_type "${{ github.event.inputs.release_type }}" '.["prerelease-type"] = $prerelease_type' release-please-config.json > tmp.json && mv tmp.json release-please-config.json
+          fi
+
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+
+      - name: Create PR from release branch to main
+        if: steps.release.outputs.release_created && (startsWith(github.ref_name, 'release/') || startsWith(github.ref_name, 'hotfix/'))
+        uses: peter-evans/create-pull-request@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: merge release branch ${{ github.ref_name }} into main'
+          title: 'Merge release branch ${{ github.ref_name }} into main'
+          body: 'This PR merges the changes from the release branch `${{ github.ref_name }}` back into `main`.'
+          branch: 'merge-release-${{ github.ref_name }}'
+          base: 'main'
